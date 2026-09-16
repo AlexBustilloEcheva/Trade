@@ -1,0 +1,27 @@
+name: Research checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONUTF8: "1"
+      ALPACA_API_KEY: ""
+      ALPACA_SECRET_KEY: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.8"
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run --frozen pytest
+      - run: uv run --frozen ruff check .
+      - run: uv run --frozen ruff format --check .
+      - run: uv run --frozen alex-quant run --config configs/fixture.toml --provider fixture --output artifacts/ci

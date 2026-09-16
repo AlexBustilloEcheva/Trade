@@ -3,9 +3,9 @@ import pandas as pd
 import pytest
 
 from alex_quant.backtest.engine import simulate
-from alex_quant.config import Config
+from alex_quant.config import AllocationConfig, Config
 from alex_quant.evaluation import calculate_metrics
-from alex_quant.portfolio import rank_scores, rebalance_after_costs
+from alex_quant.portfolio import allocate, rank_scores, rebalance_after_costs
 
 
 def small_backtest(commission=0, slippage=0):
@@ -14,6 +14,7 @@ def small_backtest(commission=0, slippage=0):
             "data": {"start": "2024-01-02", "end": "2024-01-04"},
             "universe": {"A": "XLK", "B": "XLK"},
             "research": {"top_k": 1},
+            "allocation": {"max_asset_weight": 1.0, "max_sector_weight": 1.0},
             "portfolio": {
                 "initial_capital": 100,
                 "commission_bps": commission,
@@ -91,9 +92,13 @@ def test_costs_and_drift_use_actual_holdings():
 
 
 def test_rank_ties_are_deterministic_and_limited_to_top_five():
-    ranking = rank_scores(pd.DataFrame({"symbol": list("GFEDCBA"), "score": [1.0] * 7}), 5)
+    ranking = allocate(
+        rank_scores(pd.DataFrame({"symbol": list("GFEDCBA"), "score": [1.0] * 7})),
+        {symbol: symbol for symbol in "GFEDCBA"},
+        AllocationConfig(),
+    )
     assert ranking.loc[ranking.selected, "symbol"].tolist() == list("ABCDE")
-    assert ranking.loc[ranking.selected, "target_weight"].eq(0.2).all()
+    assert ranking.loc[ranking.selected, "target_weight"].to_list() == pytest.approx([0.2] * 5)
 
 
 def test_no_shorting_or_leverage():

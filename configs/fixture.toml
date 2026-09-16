@@ -6,12 +6,11 @@ start = "2023-01-03"
 end = "2024-04-30"
 
 [walk_forward]
-train_sessions = 100
-min_train_sessions = 60
+train_sessions = 20
+min_train_sessions = 12
 retrain_every_signals = 4
 
 [model]
 n_estimators = 20
 num_leaves = 7
 min_child_samples = 15
-

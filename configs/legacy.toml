@@ -1,0 +1,10 @@
+# Explicit comparison of the original target; allocation remains constrained.
+extends = "default.toml"
+
+[research]
+label_mode = "close_to_close"
+horizon_sessions = 10
+
+[walk_forward]
+train_sessions = 504
+min_train_sessions = 252

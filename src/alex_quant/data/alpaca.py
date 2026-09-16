@@ -20,8 +20,8 @@ class AlpacaProvider(MarketDataProvider):
         self._secret = os.getenv("ALPACA_SECRET_KEY", "").strip()
         if not self._key or not self._secret:
             raise DataError(
-                "Faltan ALPACA_API_KEY y/o ALPACA_SECRET_KEY. Copie .env.example a .env "
-                "y configure ambas variables con sus claves de Alpaca, o expórtelas en el entorno. "
+                "Faltan ALPACA_API_KEY y/o ALPACA_SECRET_KEY. Configure ambas variables "
+                "en su entorno o en un archivo .env local excluido de Git. "
                 "Para una prueba explícita sin red: alex-quant run --config configs/fixture.toml "
                 "--provider fixture. No se han sustituido los datos por datos sintéticos."
             )

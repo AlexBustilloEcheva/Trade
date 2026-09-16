@@ -32,9 +32,9 @@ class DataConfig(StrictModel):
 
 
 class ResearchConfig(StrictModel):
+    label_mode: Literal["close_to_close", "rebalance_open_to_open"] = "close_to_close"
     horizon_sessions: int = Field(default=10, ge=1)
     rebalance_frequency: Literal["W-FRI", "W-MON", "daily", "monthly"] = "W-FRI"
-    top_k: int = Field(default=5, ge=1)
     minimum_history_sessions: int = Field(default=120, ge=120)
     seed: int = Field(default=42, ge=0, le=2**32 - 1)
 
@@ -60,6 +60,12 @@ class PortfolioConfig(StrictModel):
     annualization: int = Field(default=252, ge=1)
 
 
+class AllocationConfig(StrictModel):
+    top_k: int = Field(default=5, ge=1)
+    max_asset_weight: float = Field(default=0.20, gt=0, le=1)
+    max_sector_weight: float = Field(default=0.40, gt=0, le=1)
+
+
 class ModelConfig(StrictModel):
     n_estimators: int = Field(default=120, ge=1)
     learning_rate: float = Field(default=0.03, gt=0, le=1)
@@ -74,12 +80,26 @@ class Config(StrictModel):
     research: ResearchConfig = Field(default_factory=ResearchConfig)
     walk_forward: WalkForwardConfig = Field(default_factory=WalkForwardConfig)
     portfolio: PortfolioConfig = Field(default_factory=PortfolioConfig)
+    allocation: AllocationConfig = Field(default_factory=AllocationConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_top_k(cls, value: dict) -> dict:
+        value = dict(value)
+        research = dict(value.get("research", {}))
+        if "top_k" in research:
+            allocation = dict(value.get("allocation", {}))
+            if "top_k" in allocation:
+                raise ValueError("Use solo allocation.top_k; research.top_k es una clave antigua")
+            allocation["top_k"] = research.pop("top_k")
+            value.update(research=research, allocation=allocation)
+        return value
 
     @model_validator(mode="after")
     def validate_universe(self) -> Self:
-        if not self.universe or self.research.top_k > len(self.universe):
-            raise ValueError("El universo debe contener al menos top_k acciones")
+        if not self.universe:
+            raise ValueError("El universo no puede estar vacío")
         if set(self.universe) & (set(self.universe.values()) | set(self.data.benchmarks)):
             raise ValueError("Las acciones y los ETF deben ser símbolos distintos")
         if any(not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,14}", s) for s in self.symbols):

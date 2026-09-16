@@ -1,6 +1,5 @@
 import hashlib
 import json
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -22,7 +21,7 @@ def test_full_pipeline_artifacts_replay_and_portfolio_constraints(config, tmp_pa
     assert manifest["source"]["synthetic"] is True
     for name, expected_hash in manifest["files"].items():
         assert hashlib.sha256((output / name).read_bytes()).hexdigest() == expected_hash
-    assert set(metrics) == {"stockranker", "SPY", "equal_weight", "cash"}
+    assert set(metrics) == {"stockranker", "momentum", "SPY", "equal_weight", "cash"}
     positions = pd.read_csv(output / "positions.csv")
     strategy = positions.loc[positions.portfolio == "stockranker"]
     assert strategy.groupby("date").size().max() == 5
@@ -52,4 +51,3 @@ def test_fixture_is_deterministic_and_explicit(config):
     second = provider.fetch(config.symbols, config.data.start, config.data.end)
     pd.testing.assert_frame_equal(first, second, check_exact=True)
     assert provider.provenance["synthetic"] is True
-    assert Path(".env.example").read_text().count("KEY=\n") == 2

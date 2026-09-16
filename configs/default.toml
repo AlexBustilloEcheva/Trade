@@ -29,17 +29,24 @@ XOM = "XLE"
 CVX = "XLE"
 
 [research]
+label_mode = "rebalance_open_to_open"
+# Used only by the explicit close_to_close comparison mode.
 horizon_sessions = 10
 rebalance_frequency = "W-FRI"
-top_k = 5
 minimum_history_sessions = 120
 seed = 42
 
 [walk_forward]
-train_sessions = 504
-min_train_sessions = 252
+# Counts distinct labeled observation dates (weekly in the aligned mode).
+train_sessions = 104
+min_train_sessions = 52
 retrain_every_signals = 4
 embargo_sessions = 0
+
+[allocation]
+top_k = 5
+max_asset_weight = 0.20
+max_sector_weight = 0.40
 
 [portfolio]
 initial_capital = 100000.0
@@ -54,4 +61,3 @@ learning_rate = 0.03
 num_leaves = 15
 min_child_samples = 40
 reg_lambda = 1.0
-

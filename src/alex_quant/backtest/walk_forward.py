@@ -1,14 +1,14 @@
 from dataclasses import dataclass
-from datetime import timedelta
 
 import numpy as np
 import pandas as pd
 
 from alex_quant.config import Config
-from alex_quant.data.base import DataError, trading_sessions
+from alex_quant.data.base import DataError
+from alex_quant.data.schedule import rebalance_schedule, signal_dates  # noqa: F401
 from alex_quant.features import FEATURE_COLUMNS
 from alex_quant.models import StockRanker
-from alex_quant.portfolio import rank_scores
+from alex_quant.portfolio import allocate, rank_scores
 
 
 @dataclass
@@ -18,18 +18,12 @@ class WalkForwardResult:
     models: dict[str, str]
 
 
-def signal_dates(sessions: pd.DatetimeIndex, frequency: str) -> pd.DatetimeIndex:
-    if frequency == "daily":
-        return sessions[:-1]
-    # Extend the calendar so a truncated final week/month is never treated as completed.
-    calendar = trading_sessions(sessions[0].date(), sessions[-1].date() + timedelta(days=40))
-    periods = calendar.to_period("M" if frequency == "monthly" else frequency)
-    ends = pd.Series(calendar, index=periods).groupby(level=0).max()
-    return pd.DatetimeIndex(ends[ends < sessions[-1]].to_numpy(), name="date")
-
-
 def walk_forward(
-    features: pd.DataFrame, labels: pd.DataFrame, sessions: pd.DatetimeIndex, config: Config
+    features: pd.DataFrame,
+    labels: pd.DataFrame,
+    sessions: pd.DatetimeIndex,
+    config: Config,
+    schedule: pd.DataFrame | None = None,
 ) -> WalkForwardResult:
     if not features.index.is_unique or not features.index.is_monotonic_increasing:
         raise DataError("Variables duplicadas o desordenadas")
@@ -41,10 +35,14 @@ def walk_forward(
     eligible = eligible.loc[eligible.index.get_level_values("date") >= earliest]
     predictions, windows, models = [], [], {}
     model, since_fit = None, 0
-    for signal in signal_dates(sessions, config.research.rebalance_frequency):
+    if schedule is None:
+        schedule = rebalance_schedule(sessions, config.research.rebalance_frequency)
+    for signal in schedule.index:
         dates = eligible.index.get_level_values("date")
         current = eligible.loc[dates == signal]
         if len(current) != len(config.universe):
+            if model is not None:
+                raise DataError("Faltan variables para una señal programada durante la evaluación")
             continue
         if model is None or since_fit >= config.walk_forward.retrain_every_signals:
             position = sessions.get_loc(signal) - config.walk_forward.embargo_sessions
@@ -91,12 +89,11 @@ def walk_forward(
                     "score": scores,
                 }
             ),
-            config.research.top_k,
         )
+        ranked = allocate(ranked, config.universe, config.allocation)
         ranked["signal_date"] = signal
-        ranked["execution_date"] = sessions[sessions.get_loc(signal) + 1]
+        ranked["execution_date"] = schedule.loc[signal, "entry_date"]
         ranked["model_id"] = windows[-1]["model_id"]
-        ranked["sector_etf"] = ranked.symbol.map(config.universe)
         predictions.append(ranked)
         windows[-1]["prediction_end"] = str(signal.date())
         since_fit += 1

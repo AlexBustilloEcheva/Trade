@@ -54,7 +54,7 @@ def test_missing_credentials_fail_clearly_without_artifacts(monkeypatch, tmp_pat
     assert main(["run", "--output", str(output)]) == 2
     message = capsys.readouterr().err
     assert "ALPACA_API_KEY" in message and "ALPACA_SECRET_KEY" in message
-    assert ".env.example" in message
+    assert ".env" in message
     assert not output.exists()
 
 

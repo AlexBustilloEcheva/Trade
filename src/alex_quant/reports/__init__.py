@@ -4,6 +4,7 @@ import json
 import os
 import platform
 import tempfile
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -27,6 +28,7 @@ def _equity_svg(equity: pd.DataFrame) -> str:
         "SPY": "#dc2626",
         "equal_weight": "#059669",
         "cash": "#64748b",
+        "momentum": "#9333ea",
     }
     pivot = equity.pivot(index="date", columns="portfolio", values="equity")
     pivot = pivot / pivot.iloc[0] * 100
@@ -52,7 +54,7 @@ def _equity_svg(equity: pd.DataFrame) -> str:
             for j, v in enumerate(pivot[name])
         )
         parts.append(f'<polyline points="{points}" fill="none" stroke="{color}" stroke-width="2"/>')
-        parts.append(f'<text x="{65 + i * 200}" y="400" fill="{color}">{name}</text>')
+        parts.append(f'<text x="{65 + i * 160}" y="400" fill="{color}">{name}</text>')
     parts.extend(
         [
             f'<text x="65" y="375">{pivot.index[0].date()}</text>',
@@ -63,7 +65,34 @@ def _equity_svg(equity: pd.DataFrame) -> str:
     return "\n".join(parts)
 
 
-def _report(metrics: dict, config: Config, source: dict, data_hash: str, n_models: int) -> str:
+def _table(frame: pd.DataFrame) -> str:
+    def cell(value):
+        if pd.isna(value):
+            return "n/d"
+        if isinstance(value, float):
+            return f"{value:.6f}"
+        if isinstance(value, pd.Timestamp):
+            return str(value.date())
+        return str(value)
+
+    header = "| " + " | ".join(frame.columns) + " |"
+    divider = "| " + " | ".join("---" for _ in frame.columns) + " |"
+    rows = [
+        "| " + " | ".join(cell(v) for v in row) + " |"
+        for row in frame.itertuples(index=False, name=None)
+    ]
+    return "\n".join([header, divider, *rows])
+
+
+def _report(
+    metrics: dict,
+    config: Config,
+    source: dict,
+    data_hash: str,
+    n_models: int,
+    diagnostics: dict[str, pd.DataFrame],
+    stress_metrics: dict,
+) -> str:
     designation = (
         "**DATOS SINTÉTICOS DE PRUEBA. Estas cifras no son resultados de mercado.**"
         if source["synthetic"]
@@ -86,6 +115,34 @@ def _report(metrics: dict, config: Config, source: dict, data_hash: str, n_model
         "uv run --frozen alex-quant run --config RUTA/config.json --provider snapshot "
         "--snapshot RUTA --output artifacts/replay"
     )
+    exposures = pd.DataFrame(
+        [
+            {
+                "cartera": name,
+                "efectivo_medio": m["average_cash_weight"],
+                "sector_max_medio": m["average_max_sector_weight"],
+                "sector_pico": m["peak_sector_weight"],
+                "activo_pico": m["peak_asset_weight"],
+                "dias_exceso_activo": m["asset_limit_breach_sessions"],
+                "dias_exceso_sector": m["sector_limit_breach_sessions"],
+                "exceso_sector_max": m["max_sector_limit_excess"],
+                "limites_aplican": m["limits_applicable"],
+            }
+            for name, m in metrics.items()
+        ]
+    )
+    sensitivity = pd.DataFrame(
+        [
+            {
+                "cartera": name,
+                "retorno_base": m["cumulative_return"],
+                "retorno_costes_x2": stress_metrics[name]["cumulative_return"],
+                "costes_base_USD": m["costs_total"],
+                "costes_x2_USD": stress_metrics[name]["costs_total"],
+            }
+            for name, m in metrics.items()
+        ]
+    )
     return f"""# Alex Quant Lab — StockRanker
 
 {designation}
@@ -104,19 +161,65 @@ Los cocientes indefinidos se exportan como `null`, sin infinitos ni NaN.
 
 ## Método
 
-- Modelo LightGBM global de regresión; ranking de retorno a {config.research.horizon_sessions}
-  sesiones menos retorno del ETF sectorial. Selección de {config.research.top_k} acciones.
+- Modelo LightGBM global de regresión; objetivo `{config.research.label_mode}`.
+  El horizonte {config.research.horizon_sessions} solo rige en `close_to_close`.
+  En `rebalance_open_to_open`, entrada tras la señal y salida tras la siguiente señal programada.
+  Ambas a apertura, con el mismo intervalo para acción y ETF sectorial.
+- Hasta {config.allocation.top_k} acciones; peso por candidato limitado por
+  min(1/top_k, {config.allocation.max_asset_weight:.0%}, capacidad sectorial, efectivo restante).
+  Máximo sectorial {config.allocation.max_sector_weight:.0%}. Se salta un sector lleno;
+  el remanente queda en efectivo. No se exige score positivo.
 - Variables al cierre; ejecución en la siguiente apertura; nunca en el cierre de la señal.
-- Frecuencia: {config.research.rebalance_frequency}. Equiponderación tras descontar costes;
+- Frecuencia: {config.research.rebalance_frequency}. Asignación tras descontar costes;
   pesos variables entre rebalanceos. Fracciones de acción y exposición larga hasta 100%.
-- {n_models} modelos; hasta {config.walk_forward.train_sessions} sesiones de entrenamiento,
-  mínimo {config.walk_forward.min_train_sessions}; etiquetas terminadas antes del corte.
+- {n_models} modelos; hasta {config.walk_forward.train_sessions} fechas etiquetadas
+  de entrenamiento,
+  mínimo {config.walk_forward.min_train_sessions}; son fechas de señal en el modo alineado.
+  Etiquetas terminadas estrictamente antes del corte, más embargo opcional.
   Véanse [training_windows.json](training_windows.json) y [models.json](models.json).
 - Costes por nominal comprado y vendido: {config.portfolio.commission_bps} pb de comisión
   y {config.portfolio.slippage_bps} pb de deslizamiento, también en benchmarks invertidos.
 - SPY se compra una vez; equal_weight rebalancea todo el universo en las mismas fechas.
+  Momentum ordena por retorno de 120 sesiones y usa el mismo asignador que el modelo.
+  SPY y equal_weight se conservan como referencias sin límites sectoriales.
   Efectivo y tipo libre de riesgo: {config.portfolio.cash_annual_rate:.2%} anual efectivo.
 - Se conserva la cartera al final, sin liquidación ni coste terminal ficticio.
+
+## Retorno y drawdown por año
+
+Valores en fracción de unidad; años parciales sin anualizar. El drawdown se reinicia
+cada año incluyendo el capital anterior a su primera sesión.
+
+{_table(diagnostics["yearly"])}
+
+## Exposición, efectivo y concentración
+
+Los límites solo se exigen al rebalancear. Se miden excesos al cierre, incluida
+la deriva intradía de la fecha de ejecución. No son límites diarios garantizados.
+SPY y equiponderación no están sujetos al asignador restringido.
+
+{_table(exposures)}
+
+Detalle diario por sector: [sector_exposure.csv](sector_exposure.csv).
+La curva contiene exposición, peso de efectivo y desviaciones diarias.
+
+## Correlación de rangos por señal
+
+Spearman con rangos medios para empates, únicamente sobre secciones completas
+con objetivo observado al final del periodo configurado. `n/d` si los rangos son
+constantes. No constituye significación estadística ni validación económica.
+
+{_table(diagnostics["information_coefficient"])}
+
+## Sensibilidad al doble de costes
+
+Se reutilizan las mismas predicciones, candidatos, pesos objetivo y fechas.
+Se duplican comisión y deslizamiento; cambia la contabilidad de capital y nominales,
+por lo que los costes totales realizados no tienen por qué duplicarse exactamente.
+
+{_table(sensitivity)}
+
+Escenario completo: `metrics_stress.json`, `equity_stress.csv`, `trades_stress.csv`.
 
 ## Reproducción
 
@@ -140,7 +243,8 @@ retornos causales, pero la calidad histórica del proveedor no queda garantizada
 Los ajustes representan una aproximación a retorno total, no una contabilidad de
 dividendos y escisiones con sus fechas de pago. IEX cubre una sola bolsa si se selecciona.
 No se modelan subastas, capacidad, impacto variable, impuestos ni fallos de ejecución.
-Las etiquetas de diez sesiones se solapan; no hay tuning ni inferencia estadística.
+El modo antiguo de diez sesiones conserva su desajuste temporal y etiquetas solapadas.
+No hay tuning ni inferencia estadística ni evidencia económica concluyente.
 No hay órdenes reales, paper trading, cortos ni apalancamiento.
 """
 
@@ -153,6 +257,8 @@ def write_artifacts(
     walk: WalkForwardResult,
     backtest: BacktestResult,
     metrics: dict,
+    diagnostics: dict[str, pd.DataFrame],
+    stress_metrics: dict,
 ) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".alex-quant-", dir=output.parent) as temporary:
@@ -163,17 +269,23 @@ def write_artifacts(
             ("predictions", walk.predictions),
             ("positions", backtest.positions),
             ("trades", backtest.trades),
+            ("sector_exposure", backtest.sector_exposure),
+            *diagnostics.items(),
         ):
             frame.to_csv(
                 directory / f"{name}.csv", index=False, float_format="%.17g", lineterminator="\n"
             )
         write_json(directory / "config.json", config.model_dump(mode="json"))
         write_json(directory / "metrics.json", metrics)
+        write_json(directory / "metrics_stress.json", stress_metrics)
         write_json(directory / "training_windows.json", walk.training_windows)
         write_json(directory / "models.json", walk.models)
         data_hash = hashlib.sha256((directory / "input_bars.csv").read_bytes()).hexdigest()
         (directory / "report.md").write_text(
-            _report(metrics, config, source, data_hash, len(walk.models)), encoding="utf-8"
+            _report(
+                metrics, config, source, data_hash, len(walk.models), diagnostics, stress_metrics
+            ),
+            encoding="utf-8",
         )
         (directory / "equity.svg").write_text(_equity_svg(backtest.equity), encoding="utf-8")
         package_root = Path(__file__).resolve().parents[1]
@@ -212,4 +324,13 @@ def write_artifacts(
         output.mkdir(parents=True, exist_ok=True)
         # Publish complete files on the same filesystem; manifest is the final completion marker.
         for path in sorted(directory.iterdir(), key=lambda item: item.name == "manifest.json"):
-            os.replace(path, output / path.name)
+            # TemporaryDirectory has a private Windows ACL. Moving its files directly would
+            # make results unreadable to the workspace owner when running under a sandbox user.
+            # Create the publication file here so it inherits the output directory's permissions.
+            publication = output / f".{path.name}.{uuid.uuid4().hex}.tmp"
+            try:
+                with publication.open("xb") as stream:
+                    stream.write(path.read_bytes())
+                os.replace(publication, output / path.name)
+            finally:
+                publication.unlink(missing_ok=True)
