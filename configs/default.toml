@@ -1,0 +1,57 @@
+[data]
+start = "2019-01-01"
+end = "2025-12-31"
+feed = "sip"
+adjustment = "all"
+calendar = "XNYS"
+benchmarks = ["SPY", "QQQ"]
+
+[universe]
+AAPL = "XLK"
+MSFT = "XLK"
+NVDA = "XLK"
+AVGO = "XLK"
+GOOGL = "XLC"
+META = "XLC"
+AMZN = "XLY"
+COST = "XLP"
+WMT = "XLP"
+JPM = "XLF"
+BAC = "XLF"
+GS = "XLF"
+LLY = "XLV"
+UNH = "XLV"
+JNJ = "XLV"
+CAT = "XLI"
+GE = "XLI"
+RTX = "XLI"
+XOM = "XLE"
+CVX = "XLE"
+
+[research]
+horizon_sessions = 10
+rebalance_frequency = "W-FRI"
+top_k = 5
+minimum_history_sessions = 120
+seed = 42
+
+[walk_forward]
+train_sessions = 504
+min_train_sessions = 252
+retrain_every_signals = 4
+embargo_sessions = 0
+
+[portfolio]
+initial_capital = 100000.0
+commission_bps = 5.0
+slippage_bps = 5.0
+cash_annual_rate = 0.0
+annualization = 252
+
+[model]
+n_estimators = 120
+learning_rate = 0.03
+num_leaves = 15
+min_child_samples = 40
+reg_lambda = 1.0
+

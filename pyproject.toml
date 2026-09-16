@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "alex-quant-lab"
+version = "0.1.0"
+description = "Reproducible, long-only quantitative equity research"
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+  "numpy>=2.2,<2.3",
+  "pandas>=2.2,<3",
+  "lightgbm>=4.6,<5",
+  "scikit-learn>=1.6,<2",
+  "httpx>=0.28,<0.29",
+  "pydantic>=2.11,<3",
+  "python-dotenv>=1.1,<2",
+  "exchange-calendars>=4.11,<5",
+]
+
+[project.scripts]
+alex-quant = "alex_quant.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.4,<9", "ruff>=0.12,<1"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/alex_quant"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+filterwarnings = ["error"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
